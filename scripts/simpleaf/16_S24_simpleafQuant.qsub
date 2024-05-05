@@ -1,0 +1,48 @@
+#!/bin/bash -l
+
+# this file serving as template for creating customized qsub file, 
+# the file name shall be changed properly after customized for job.
+# run 'qsub [-N jobname] myjobname.qsub projectname'
+#
+# All lines starting with "#" are comments
+# All lines starting with "#$" are SGE qsub commands
+#
+# Set SCC project
+#$ -P tcwlab
+
+# Specify hard time limit for the job. 
+#   The job will be aborted if it runs longer than this time.
+#   The default time is 12 hours
+#$ -l h_rt=24:00:00
+
+# Combine output and error files into a single file
+#$ -j y
+
+#  Name the log directory where to redirect standard output and error
+#$ -o logs/16_S24.log # make sure qlog/ exists and is in the working directory, otherwise give the full path.
+
+
+#  request enough memory:
+# -l mem_per_core=8G
+
+# Specify computing resources
+# can be omp, 
+#$ -pe omp 16
+
+# Load Conda environment
+source /usr3/graduate/akg/miniconda3/bin/activate /usr3/graduate/akg/miniconda3/envs/af
+
+# Set environment variable
+export ALEVIN_FRY_HOME="$PWD"
+
+# Set ulimit
+ulimit -n 4096
+
+# Run commands
+simpleaf set-paths
+
+## Dual Index kit from 10x Genomics (3 prime)
+
+simpleaf quant --reads1 ./ref_data/APOE_Jorganoid/data/data/230804_A00220_0594_BHG5H3DSX7/16_S24_L001_R1_001.fastq.gz,./ref_data/APOE_Jorganoid/data/data/230804_A00220_0594_BHG5H3DSX7/16_S24_L002_R1_001.fastq.gz,./ref_data/APOE_Jorganoid/data/data/230804_A00220_0594_BHG5H3DSX7/16_S24_L003_R1_001.fastq.gz \
+  --reads2 ./ref_data/APOE_Jorganoid/data/data/230804_A00220_0594_BHG5H3DSX7/16_S24_L001_R2_001.fastq.gz,./ref_data/APOE_Jorganoid/data/data/230804_A00220_0594_BHG5H3DSX7/16_S24_L002_R2_001.fastq.gz,./ref_data/APOE_Jorganoid/data/data/230804_A00220_0594_BHG5H3DSX7/16_S24_L003_R2_001.fastq.gz \
+  --threads 28 --index outputs/index_dir/index/ --chemistry 10xv3 --resolution cr-like --unfiltered-pl --expected-ori fw --t2g-map /projectnb/tcwlab/LabMember/akg/APOE_Jorganoid_project/outputs/index_dir/index/t2g_3col.tsv --output outputs/16_S24/

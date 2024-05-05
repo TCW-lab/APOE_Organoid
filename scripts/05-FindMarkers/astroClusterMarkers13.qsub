@@ -1,0 +1,37 @@
+#!/bin/bash -l
+#Parameters of the Jobs :
+
+#$-P  tcwlab
+#$-j y
+#$-l h_rt=24:00:00
+#$-o  ./logs/05-FindMarkers/astroClusterMarkers13.log
+#$-pe omp 10
+
+
+#Modules to load:
+
+module load R/4.2.1
+
+
+#keep track of some information just in case anything goes wrong
+echo "=========================================================="
+echo "Starting on : $(date)"
+echo "Running on node : $(hostname)"
+echo "Current directory : $(pwd)"
+echo "Current job ID : $JOB_ID"
+echo "Current job name : $JOB_NAME"
+if [[ -n "${SGE_TASK_ID}" && $SGE_TASK_ID != "undefined" ]]; then
+echo "Task index number : $SGE_TASK_ID"
+fi
+if [[ -n "${SGE_TASK_LAST}" && $SGE_TASK_LAST != "undefined" ]]; then
+echo "Total task number : $SGE_TASK_LAST"
+fi
+echo "=========================================================="
+
+Rscript scripts/05-FindMarkers/astroClusterMarkers13.R >> ./logs/05-FindMarkers/astroClusterMarkers13.log
+
+
+
+echo "=========================================================="
+echo "Finished Analysis for job $JOB_ID on : $(date)"
+echo "=========================================================="
