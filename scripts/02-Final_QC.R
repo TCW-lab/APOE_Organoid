@@ -45,22 +45,23 @@ library(tidyr)
 .libPaths()
 source("~/.Rprofile")
 
-###* denotes changes made by AKG *###
-###* Step 1: Read in the individual samples' Seurat object files            *###
-###* Then, combine them into one Seurat object. This object will be used to *###
-###* be a point of comparison for before/after quality control steps        *###
-setwd("/projectnb/tcwlab/LabMember/akg/APOE_Jorganoid_project/")
+###* denotes changes made by AKG
+###* Step 1: Read in the individual samples' Seurat object files ####
+###* Then, combine them into one Seurat object. This object will be used to
+###* be a point of comparison for before/after quality control steps
+setwd("/projectnb/tcwlab/LabMember/akg/projects/APOE_Organoid")
 
-dir <- "/projectnb/tcwlab/LabMember/akg/APOE_Jorganoid_project/outputs"
-out<-'outputs/simpleafSeurat'
+dir <- "/projectnb/tcwlab/LabMember/akg/projects/APOE_Organoid"
+out<-'outputs/02-Final_QC'
+
 
 S1 <- readRDS(file = "./outputs/simpleafSeurat/sample1.rds")
 S2 <- readRDS(file = "./outputs/simpleafSeurat/sample2.rds")
 S3 <- readRDS(file = "./outputs/simpleafSeurat/sample3.rds")
 S4 <- readRDS(file = "./outputs/simpleafSeurat/sample4.rds")
-###* No Sample 5 (deemed poor quality by researchers)                       *###
+###* No Sample 5 (deemed poor quality by researchers)
 S6 <- readRDS(file = "./outputs/simpleafSeurat/sample6.rds")
-###* No Sample 7 (deemed poor quality by researchers)                       *###
+###* No Sample 7 (deemed poor quality by researchers)
 S8 <- readRDS(file = "./outputs/simpleafSeurat/sample8.rds")
 S9 <- readRDS(file = "./outputs/simpleafSeurat/sample9.rds")
 S10 <- readRDS(file = "./outputs/simpleafSeurat/sample10.rds")
@@ -80,6 +81,7 @@ S23 <- readRDS(file = "./outputs/simpleafSeurat/sample23.rds")
 S24 <- readRDS(file = "./outputs/simpleafSeurat/sample24.rds")
 S25 <- readRDS(file = "./outputs/simpleafSeurat/sample25.rds")
 S26 <- readRDS(file = "./outputs/simpleafSeurat/sample26.rds")
+
 
 ###* Proceed by merging all the samples into a single object, called organoid0
 APOE22_samples_group <- c("S3", "S9", "S12", "S15", "S21", "S25")
@@ -139,16 +141,100 @@ organoid0 <- merge(S1, y = c(S2, S3, S4, S6, S8, S9, S10,
                    add.cell.ids = c("S1", "S2", "S3", "S4", "S6", "S8", "S9", "S10",
                                     "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19",
                                     "S20", "S21", "S22", "S23", "S24", "S25", "S26"),
-                   project = "APOE_Jorganoid"
+                   project = "APOE_Organoid"
 )
 
-organoid0 <- readRDS('outputs/simpleafSeurat/organoid0.rds')
+
+saveRDS(organoid0, file = paste0(dir, '/outputs/organoid0.rds'))
+unique(organoid0@meta.data$sample)
+organoid0 <- readRDS('./outputs/organoid0.rds')
+# rm(S1, S2, S3, S4, S6, S8, S9, S10,
+#    S11, S12, S13, S14, S15, S16, S17, S18, S19,
+#    S20, S21, S22, S23, S24, S25, S26)
+
+rownames(organoid0)
+
+# Initialize a data frame to store cell counts before and after QC
+cell_counts <- data.frame(sample = character(), 
+                          cells_before_QC = integer(), 
+                          cells_after_QC = integer())
+
+# Get unique sample identifiers
+samples <- unique(organoid0@meta.data$sample)
+
+# Define mitochondrial genes (adjust according to your organism)
+mt_gene_names <- grep("^MT-", rownames(organoid0), value = TRUE)
+
+organoid_list <- list()
+
+# Loop over each sample
+for (sample_id in samples) {
+  # Subset Seurat object for the current sample
+  T_QC <- subset(organoid0, subset = sample == sample_id)
+  
+  # Record the number of cells before QC
+  cells_before <- ncol(T_QC)
+  
+  # Filter genes expressed in less than 3 cells
+  raw_counts_mat <- T_QC@assays$RNA@counts
+  genes_to_keep <- Matrix::colSums(raw_counts_mat != 0) >= 3
+  T_QC <- subset(T_QC, features = rownames(T_QC)[genes_to_keep])
+  
+  # Calculate upper limit, set at 99.5 percentile
+  upper_limit <- quantile(T_QC@meta.data$nCount_RNA, probs = 0.995)
+  
+  T_QC <- CalculateBarcodeInflections(
+    T_QC,
+    barcode.column = "nCount_RNA",
+    group.column = "orig.ident",
+    threshold.low = 1000,
+    threshold.high = NULL
+  )
+  T_QC <- SubsetByBarcodeInflections(object = T_QC)
+  
+  # Record the number of cells after QC
+  cells_after <- ncol(T_QC)
+  
+  # append the QC'd object onto the organoid_list (so we can combine after)
+  organoid_list[[sample_id]] <- T_QC
+  
+  # Append the cell count information to the data frame
+  cell_counts <- rbind(cell_counts, data.frame(sample = sample_id,
+                                               cells_before_QC = cells_before,
+                                               cells_after_QC = cells_after))
+}
+
+# merge all QC'd Seurat objects into one (all alrdy have unique cell identifiers)
+if(length(organoid_list) > 1) {
+  # do.call to apply the merge function to a list of Seurat objects
+  organoid1 <- do.call(merge, c(list(x = organoid_list[[1]], y = organoid_list[-1]), list(project = "APOE_Organoid")))
+} else if(length(organoid_list) == 1) {
+  # Only one object, simply rename the project if necessary
+  organoid1 <- RenameProject(organoid_list[[1]], "APOE_Organoid")
+} else {
+  # No objects were processed successfully
+  message("No data processed successfully.")
+}
+
+
+
+organoid1 <- merge(x = organoid_list[[1]], y = organoid_list[-1], 
+                           add.cell.ids = names(organoid_list[-1]), 
+                           project = "APOE_Organoid")
+
+
+
+# View the cell counts data frame
+print(cell_counts)
+
+# Step 2. Label and quantify Mitochrondrial DNA and Ribosomal DNA ####
 
 ### Note: A lot of the mitochondrial genes, when undergoing the mapping of 
 ### ENSEMBL_IDs to gene symbols, somehow got excluded from this process.
 ### In order to deal with this, we will define a list of all the ENSEMBL IDs AND
 ### their gene symbols for
 ### all 37 Human Mitochondrial genes
+
 mt_gene_names <- c(
   "ENSG00000198888", # ND1
   "ENSG00000198763", # ND2
@@ -195,65 +281,12 @@ mt_gene_names <- c(
 )
 
 
-rownames(organoid0)
-
-### let's do ambient
-### RNA correction first:
-
-# Initialize a data frame to store cell counts before and after QC
-cell_counts <- data.frame(sample = character(), 
-                          cells_before_QC = integer(), 
-                          cells_after_QC = integer())
-
-# Get unique sample identifiers
-samples <- unique(organoid0@meta.data$sample)
-
-# Define mitochondrial genes (adjust according to your organism)
-mt_gene_names <- grep("^MT-", rownames(organoid0), value = TRUE)
-
-# Loop over each sample
-for (sample_id in samples) {
-  # Subset Seurat object for the current sample
-  T_QC <- subset(organoid0, subset = sample == sample_id)
-  
-  # Record the number of cells before QC
-  cells_before <- ncol(T_QC)
-  
-  # Filter genes expressed in less than 3 cells
-  raw_counts_mat <- T_QC@assays$RNA@counts
-  genes_to_keep <- Matrix::colSums(raw_counts_mat != 0) >= 3
-  T_QC <- subset(T_QC, features = rownames(T_QC)[genes_to_keep])
-  
-  # Calculate upper limit, set at 99.5 percentile
-  upper_limit <- quantile(T_QC@meta.data$nCount_RNA, probs = 0.995)
-  
-  T_QC <- CalculateBarcodeInflections(
-    T_QC,
-    barcode.column = "nCount_RNA",
-    group.column = "orig.ident",
-    threshold.low = 1000,
-    threshold.high = NULL
-  )
-  T_QC <- SubsetByBarcodeInflections(object = T_QC)
-  
-  # Record the number of cells after QC
-  cells_after <- ncol(T_QC)
-  
-  # Append the cell count information to the data frame
-  cell_counts <- rbind(cell_counts, data.frame(sample = sample_id,
-                                               cells_before_QC = cells_before,
-                                               cells_after_QC = cells_after))
-}
-
-# View the cell counts data frame
-print(cell_counts)
-
-#### SoupX Correction
 
 
+# Step 3. Apply SoupX Correction (Ambient RNA Removal) ####
 
-######~~~~~ Deepti's SoupX Code ~~~~~###########################################
-#SoupX 
+
+# Running 
 library(tools)
 library(Seurat)
 library(data.table)
@@ -295,8 +328,6 @@ getGeneSymbols <- function(ensembl_ids) {
                          multiVals = "first")
   return(gene_symbols)
 }
-
-
 
 # Load raw counts
 custom_format <- list("counts" = c("U","S","A"))
