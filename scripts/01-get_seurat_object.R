@@ -2,9 +2,9 @@
 ## 12-01-23 akg adjusted script to separate ##
 ## un-spliced from spliced data             ##
 ##############################################
-setwd('/projectnb/tcwlab/LabMember/akg/APOE_Jorganoid_project/')
+setwd('/projectnb/tcwlab/LabMember/akg/projects/APOE_Organoid_project/')
 
-out<-'outputs/simpleafSeurat'
+out<-'outputs/01-Simpleaf_Outputs'
 # dir.create(out)
 
 library(tools)
@@ -31,15 +31,40 @@ getGeneSymbols <- function(ensembl_ids) {
                          multiVals = "first")
   return(gene_symbols)
 }
+ ####* 05-10-2024####
+counts.mat <- organoid0@assays$RNA@counts
+
+cr_features <- fread('/projectnb/tcwlab/LabMember/adpelle1/projects/APOE_Jorganoid/outputs/CellRangerCount/sample_1/outs/filtered_feature_bc_matrix/features.tsv.gz', col.names = c('ENSEMBL', 'symbol', 'expression'))
+
+rownames(counts.mat) = cr_features[rownames(counts.mat), on = 'ENSEMBL']$symbol
+
+rownames(counts.mat)
+
+
+ensembl_ids_sce <- rownames(sce)
+gene_symbols_sce <- getGeneSymbols(ensembl_ids_sce)
+
+# Replace Ensembl IDs with gene symbols in row names
+# If no gene symbol is found, retain the original Ensembl ID
+updated_rownames <- ifelse(is.na(gene_symbols_sce[ensembl_ids_sce]), ensembl_ids_sce, gene_symbols_sce[ensembl_ids_sce])
+rownames(sce) <- updated_rownames
+
+micromamba create -n simpleaf -y -c bioconda -c conda-forge simpleaf piscem
+micromamba activate simpleaf
+
+micromamba create -n simpleaf -y -c bioconda -c conda-forge simpleaf piscem
+micromamba activate simpleaf
+
+
 
 ###* 10X genomics changes as per Alexandre's pipeline              *############
 
 ###* Below is the QC pipeline, performed on the outputted matrices of Simpleaf
 ###* This was done on all 24 samples. The 
 # Read the matrix
-mat <- ReadMtx('outputs/1_S16/af_quant/alevin/quants_mat.mtx',
-               cells = 'outputs/1_S16/af_quant/alevin/quants_mat_cols.txt',
-               features = 'outputs/1_S16/af_quant/alevin/quants_mat_rows.txt',
+mat <- ReadMtx('outputs/01-Simpleaf_Outputs/12_S20/af_quant/alevin/quants_mat.mtx',
+               cells = 'outputs/01-Simpleaf_Outputs/12_S20/af_quant/alevin/quants_mat_cols.txt',
+               features = 'outputs/01-Simpleaf_Outputs/12_S20/af_quant/alevin/quants_mat_rows.txt',
                feature.column = 1)
 
 # Use getGeneSymbols function to map Ensembl IDs to gene symbols
@@ -83,7 +108,7 @@ updated_rownames <- ifelse(is.na(gene_symbols_sce[ensembl_ids_sce]), ensembl_ids
 rownames(sce) <- updated_rownames
 
 #create the seurat object by filtering for selected cells
-S1<-CreateSeuratObject(counts(sce[,cells]),project = 'Jorganoid')
+S1<-CreateSeuratObject(counts(sce[,cells]),project = 'Organoid')
 head(rownames(S1))
 # An object of class Seurat 
 # 58219 features across 8979 samples within 1 assay 
@@ -126,7 +151,7 @@ cells<-rownames(mat)[rowSums(mat)>cell_cutoff]
 #cellS5<-cells_count[count>cell_cutoff]$cell #same
 matf<-mat[cells,]
 
-S5<-CreateSeuratObject(t(as.matrix(matf)),project = 'Jorganoid')
+S5<-CreateSeuratObject(t(as.matrix(matf)),project = 'Organoid')
 # An object of class Seurat 
 # 174657 features across 5460 samples within 1 assay 
 # Active assay: RNA (174657 features, 0 variable features)
@@ -202,7 +227,7 @@ ElbowPlot(object = APOE_Jorganoid)
 APOE_Jorganoid <- RunUMAP(APOE_Jorganoid, dims = 1:10)
 DimPlot(APOE_Jorganoid, reduction = "umap")
 
-saveRDS(APOE_Jorganoid,file.path(out,'APOE_Jorganoid.rds'))
+saveRDS(APOE_Jorganoid,file.path(out,'APOE_Organoid.rds'))
 
 #---- end of data pre-processing ----#
 # APOE_Jorganoid <- readRDS(file = "./outputs/01-get_seurat_object/APOE_Jorganoid.rds")

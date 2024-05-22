@@ -45,8 +45,9 @@ library(tidyr)
 .libPaths()
 source("~/.Rprofile")
 
+# Step 1: Read in the indiv samples' Seurat object files & combine into one ####
+
 ###* denotes changes made by AKG
-###* Step 1: Read in the individual samples' Seurat object files ####
 ###* Then, combine them into one Seurat object. This object will be used to
 ###* be a point of comparison for before/after quality control steps
 setwd("/projectnb/tcwlab/LabMember/akg/projects/APOE_Organoid")
@@ -129,7 +130,7 @@ for (i in seq_along(APOE44_samples_group)) {
 }
 
 ################################################################################
-#########@######################################################################
+################################################################################
 
 
 ##* Merge all Seurat objects into one *##
@@ -147,7 +148,15 @@ organoid0 <- merge(S1, y = c(S2, S3, S4, S6, S8, S9, S10,
 
 saveRDS(organoid0, file = paste0(dir, '/outputs/organoid0.rds'))
 unique(organoid0@meta.data$sample)
+
+# Step 2. Iterate through organoid object & remove outliers ####
+# By this, I mean subset for genes found in >=3 genes, 
+# 1000 < number of genes in a cell < 99.5th percentile
+
 organoid0 <- readRDS('./outputs/organoid0.rds')
+unique(organoid0@meta.data$sample)
+
+
 # rm(S1, S2, S3, S4, S6, S8, S9, S10,
 #    S11, S12, S13, S14, S15, S16, S17, S18, S19,
 #    S20, S21, S22, S23, S24, S25, S26)
@@ -161,60 +170,86 @@ cell_counts <- data.frame(sample = character(),
 
 # Get unique sample identifiers
 samples <- unique(organoid0@meta.data$sample)
-
-# Define mitochondrial genes (adjust according to your organism)
-mt_gene_names <- grep("^MT-", rownames(organoid0), value = TRUE)
-
+# unique(samples)
 organoid_list <- list()
+
+VlnPlot(organoid0, pt.size = 0, group.by = 'sample', features = 'nFeature_RNA', log = TRUE)
+
 
 # Loop over each sample
 for (sample_id in samples) {
   # Subset Seurat object for the current sample
-  T_QC <- subset(organoid0, subset = sample == sample_id)
+  indiv_QC <- subset(organoid0, subset = sample == sample_id)
   
-  # Record the number of cells before QC
-  cells_before <- ncol(T_QC)
+  # record the number of cells before QC
+  cells_before <- ncol(indiv_QC)
+  
+  # only include cells with at least 200 genes expressed
+  indiv_QC <- subset(indiv_QC, subset = nFeature_RNA > 200)
+  num_umis_before <- sum(indiv_QC[["nCount_RNA"]] < 1000)
   
   # Filter genes expressed in less than 3 cells
-  raw_counts_mat <- T_QC@assays$RNA@counts
-  genes_to_keep <- Matrix::colSums(raw_counts_mat != 0) >= 3
-  T_QC <- subset(T_QC, features = rownames(T_QC)[genes_to_keep])
+  raw_counts_mat <- indiv_QC@assays$RNA@counts
+  genes_to_keep <- Matrix::colSums(raw_counts_mat) >= 3
+  indiv_QC <- subset(indiv_QC, features = rownames(indiv_QC)[genes_to_keep])
   
+  
+  ncol(indiv_QC)
   # Calculate upper limit, set at 99.5 percentile
-  upper_limit <- quantile(T_QC@meta.data$nCount_RNA, probs = 0.995)
-  
-  T_QC <- CalculateBarcodeInflections(
-    T_QC,
+  head(sort(unique(indiv_QC@meta.data$nCount_RNA), decreasing = TRUE))
+  upper_limit <- quantile(indiv_QC@meta.data$nCount_RNA, probs = 0.995)
+  print(upper_limit)
+  indiv_QC1 <- CalculateBarcodeInflections(
+    indiv_QC,
     barcode.column = "nCount_RNA",
-    group.column = "orig.ident",
-    threshold.low = 1000,
-    threshold.high = NULL
+    group.column = "sample",
+    threshold.low = NULL, #this is barcode rank, not absolute counts.
+    threshold.high = upper_limit
   )
-  T_QC <- SubsetByBarcodeInflections(object = T_QC)
+  indiv_QC2 <- SubsetByBarcodeInflections(object = indiv_QC1)
   
   # Record the number of cells after QC
-  cells_after <- ncol(T_QC)
-  
+  cells_after <- ncol(indiv_QC2)
+  print(cells_before)
+  print(cells_after)
   # append the QC'd object onto the organoid_list (so we can combine after)
-  organoid_list[[sample_id]] <- T_QC
+  organoid_list[[sample_id]] <- indiv_QC2
   
   # Append the cell count information to the data frame
   cell_counts <- rbind(cell_counts, data.frame(sample = sample_id,
                                                cells_before_QC = cells_before,
                                                cells_after_QC = cells_after))
+  
+  num_umis_after <- sum(indiv_QC2[["nCount_RNA"]] < 1000)
+  
+  # Print statement
+  print(paste("Number of UMIs per cell before (under 1000):", num_umis_before, 
+              ". Number of UMIs per cell after (under 1000):", num_umis_after))
+  
 }
+
 
 # merge all QC'd Seurat objects into one (all alrdy have unique cell identifiers)
 if(length(organoid_list) > 1) {
   # do.call to apply the merge function to a list of Seurat objects
   organoid1 <- do.call(merge, c(list(x = organoid_list[[1]], y = organoid_list[-1]), list(project = "APOE_Organoid")))
 } else if(length(organoid_list) == 1) {
-  # Only one object, simply rename the project if necessary
+  # only one object, simply rename the project if necessary
   organoid1 <- RenameProject(organoid_list[[1]], "APOE_Organoid")
 } else {
-  # No objects were processed successfully
+  # error catch
   message("No data processed successfully.")
 }
+
+print(cell_counts)
+
+aggregated_cell_counts <- aggregate(. ~ genotype, data = cell_counts, FUN = sum)
+
+# View the cell counts data frame
+#print(cell_counts)
+print(aggregated_cell_counts)
+
+
 
 
 
@@ -222,7 +257,8 @@ organoid1 <- merge(x = organoid_list[[1]], y = organoid_list[-1],
                            add.cell.ids = names(organoid_list[-1]), 
                            project = "APOE_Organoid")
 
-
+library(stringr)
+sum(str_detect(rownames(organoid0), '^ENSG'))
 
 # View the cell counts data frame
 print(cell_counts)
