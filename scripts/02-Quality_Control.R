@@ -350,10 +350,6 @@ aggregated_cell_counts <- aggregate(. ~ genotype, data = cell_counts, FUN = sum)
 #print(cell_counts)
 print(aggregated_cell_counts)
 
-
-
-
-
 organoid1 <- merge(x = organoid_list[[1]], y = organoid_list[-1], 
                    add.cell.ids = names(organoid_list[-1]), 
                    project = "APOE_Organoid")
