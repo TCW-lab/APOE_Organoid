@@ -21,6 +21,8 @@ library(tidyr)
 library(SeuratWrappers)
 library(data.table)
 library(SoupX)
+library(fishpond)
+
 setwd("/projectnb/tcwlab/LabMember/akg/projects/APOE_Organoid")
 
 dir <- "/projectnb/tcwlab/LabMember/akg/projects/APOE_Organoid"
@@ -71,60 +73,12 @@ organoid2 <- readRDS(paste0(dir, '/outputs/03-miQC_and_SoupX/organoid2.rds'))
 ## First, we need to cluster our Seurat object. This is necessary for SoupX
 ## But before we do this, we will integrate all our individual counts layers into one
 
-# Function to merge individual Seurat objects based on sample IDs and combine their counts
-# merge_seurat_objects_by_sample <- function(seurat_obj) {
-#   # Extract unique sample IDs from meta.data
-#   sample_ids <- unique(seurat_obj@meta.data$sample)
-#   
-#   # List to store individual counts matrices
-#   counts_list <- list()
-#   
-#   # Loop through each sample ID, subset, and extract the counts matrix
-#   for (sample_id in sample_ids) {
-#     subset_obj <- subset(seurat_obj, subset = sample == sample_id)
-#     counts_list[[sample_id]] <- GetAssayData(subset_obj, layer = "counts")
-#   }
-#   
-#   # Get the union of all genes (rows) across the counts matrices
-#   all_genes <- unique(unlist(lapply(counts_list, rownames)))
-#   
-#   # Align all counts matrices to have the same genes (rows)
-#   aligned_counts_list <- lapply(counts_list, function(counts) {
-#     aligned_counts <- Matrix::Matrix(0, nrow = length(all_genes), ncol = ncol(counts), sparse = TRUE)
-#     rownames(aligned_counts) <- all_genes
-#     colnames(aligned_counts) <- colnames(counts)
-#     common_genes <- intersect(rownames(counts), all_genes)
-#     aligned_counts[common_genes, ] <- counts[common_genes, ]
-#     return(aligned_counts)
-#   })
-#   
-#   # Combine the aligned counts matrices into one
-#   combined_counts <- do.call(cbind, aligned_counts_list)
-#   
-#   # Create a new Seurat object with the combined counts matrix
-#   new_seurat_obj <- CreateSeuratObject(counts = combined_counts, meta.data = seurat_obj@meta.data)
-#   
-#   # Normalize and find variable features for the new Seurat object
-#   new_seurat_obj <- NormalizeData(new_seurat_obj)
-#   new_seurat_obj <- FindVariableFeatures(new_seurat_obj)
-#   new_seurat_obj <- ScaleData(new_seurat_obj)
-#   
-#   return(new_seurat_obj)
-# }
-
-# Apply the function to your combined Seurat object
-# organoid2_merged <- merge_seurat_objects_by_sample(organoid2)
-
-
 #merge the counts layers into one:
-
-
-
 organoid2[["RNA"]] <- JoinLayers(organoid2[["RNA"]])
 
 
 
-
+## Perform the normalization, VariableFeatures, Scaling, PCA, etc. here
 organoid2 <- NormalizeData(organoid2)
 organoid2 <- FindVariableFeatures(organoid2)
 organoid2 <- ScaleData(organoid2)
@@ -142,16 +96,18 @@ raw_counts_directories <- c("1_S16/af_quant", "2_S8/af_quant", "3_S9/af_quant", 
                             "25_S18/af_quant", "26_S4/af_quant") # paths to quant files
 
 
+gene_names <- fread('/projectnb/tcwlab/LabMember/adpelle1/projects/APOE_Jorganoid/outputs/CellRangerCount/sample_1/outs/filtered_feature_bc_matrix/features.tsv.gz', 
+                    col.names = c('GENEID', 'SYMBOL', 'c3'))
+# remove the c3 column from the gene_names data.table df
+gene_names <- gene_names[, c3 := NULL]
+# set GENEID to rownames attribute, in order to make the following easier
+rownames(gene_names) <- gene_names$GENEID
 
 # Load raw counts
 custom_format <- list("counts" = c("U","S","A"))
 
 # Function to apply SoupX correction
 apply_soupX_correction <- function(seurat_obj, raw_counts_directory) {
-  library(SoupX)
-  library(fishpond)
-  library(Seurat)
-  
   # Load raw counts
   sce <- fishpond::loadFry(raw_counts_directory, outputFormat = "scRNA")
   
@@ -168,25 +124,24 @@ apply_soupX_correction <- function(seurat_obj, raw_counts_directory) {
   raw <- raw[common_genes, , drop = FALSE]
   
   # Access counts based on Seurat version
-  if (packageVersion("Seurat") >= "4") {
-    seurat_counts <- GetAssayData(seurat_obj, slot = "counts")[common_genes, , drop = FALSE]
+  if (packageVersion("Seurat") >= "5") {
+    seurat_counts <- GetAssayData(seurat_obj, layer = "counts")[common_genes, , drop = FALSE]
   } else {
-    seurat_counts <- seurat_obj@assays$RNA@counts[common_genes, , drop = FALSE]
+    print('You need to update this code to work with an earlier (<=4) version of Seurat.')
   }
-  
   # Ensure the gene order is the same in both matrices
   raw <- raw[order(rownames(raw)), , drop = FALSE]
   seurat_counts <- seurat_counts[order(rownames(seurat_counts)), , drop = FALSE]
   
   # Apply SoupX correction
   sc <- SoupChannel(tod = raw, toc = seurat_counts)
-  sc <- setClusters(sc, seurat_obj$initial_seurat_clustering_0.5)
+  sc <- setClusters(sc, seurat_obj$seurat_clusters)
   sc <- autoEstCont(sc, doPlot = FALSE)
   soup_out <- adjustCounts(sc, roundToInt = TRUE)
   
   # Integrate corrected counts into Seurat object
   seurat_obj[["SoupX_counts"]] <- CreateAssayObject(counts = soup_out)
-  seurat_obj <- SetAssayData(seurat_obj, slot = "counts", new.data = soup_out, assay = "RNA")
+  seurat_obj <- SetAssayData(seurat_obj, layer = "counts", new.data = soup_out, assay = "RNA")
   
   # Return the corrected Seurat object
   return(seurat_obj)
@@ -199,8 +154,8 @@ mrna_counts <- data.frame(sample = character(),
                           mrna_after_correction = numeric()
 )
 
-samples <- unique(organoid2@meta.data$samples)
-
+samples <- unique(organoid2@meta.data$sample)
+organoid_list <- list()
 # Loop over each sample to apply SoupX correction and record mRNA sums
 for (i in 1:length(samples)) {
   sample_id <- samples[i]
@@ -216,7 +171,7 @@ for (i in 1:length(samples)) {
   indiv_seurat <- apply_soupX_correction(indiv_seurat, raw_counts_directory)
   
   # Record the sum of mRNA molecules after correction
-  mrna_after <- sum(indiv_seurat@assays$RNA@counts)
+  mrna_after <- sum(indiv_seurat@assays$SoupX_counts$counts)
   
   # Print statement for debugging
   print(paste0("Sample: ", sample_id, ". mrna_before: ", mrna_before, ". mrna_after: ", mrna_after))
@@ -254,3 +209,8 @@ aggregated_mrna_counts <- aggregate(cbind(mrna_before_correction, mrna_after_cor
 # Print the result
 print(aggregated_mrna_counts)
 
+
+write.csv(mrna_counts, file = paste0(dir, '/outputs/03-miQC_and_SoupX/SoupX_counts_by_Sample.csv'))
+write.csv(aggregated_mrna_counts, file = paste0(dir, '/outputs/03-miQC_and_SoupX/SoupX_counts_by_Genotype.csv'))
+
+saveRDS(organoid3, file = paste0(dir, '/outputs/03-miQC_and_SoupX/organoid4.rds'))
