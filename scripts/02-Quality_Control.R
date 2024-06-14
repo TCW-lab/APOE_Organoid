@@ -28,6 +28,8 @@ library(singleCellTK)
 library(DropletUtils)
 library(SeuratData)
 library(tidyr)
+library(DoubletFinder)
+library(sctransform)
 # .libPaths()
 # source("~/.Rprofile")
 
@@ -114,35 +116,24 @@ for (i in seq_along(APOE44_samples_group)) {
 ################################################################################
 
 
-##* Merge all Seurat objects into one *##
-##* Can easily process it as one object *##
-##* 
-organoid0 <- merge(S1, y = c(S2, S3, S4, S6, S8, S9, S10,
-                             S11, S12, S13, S14, S15, S16, S17, S18, S19,
-                             S20, S21, S22, S23, S24, S25, S26), 
-                   add.cell.ids = c("S1", "S2", "S3", "S4", "S6", "S8", "S9", "S10",
-                                    "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19",
-                                    "S20", "S21", "S22", "S23", "S24", "S25", "S26"),
-                   project = "APOE_Organoid"
+
+
+# Initialize a data frame to store cell counts before and after QC
+cell_counts_DF <- data.frame(
+  sample = character(), 
+  genotype = character(),
+  cells_before_QC = integer(), 
+  cells_after_QC = integer(),
+  percent_recovery_QC = numeric(),
+  percent_removed_QC = numeric(),
+  cells_after_doubletF = integer(),
+  percent_recovery_DF = numeric(),
+  percent_removed_DF = numeric(),
+  stringsAsFactors = FALSE  # Ensure strings are not converted to factors
 )
 
-unique(organoid0@meta.data$genotype)
-
-# saveRDS(organoid0, file = paste0(dir, '/outputs/02-Quality-Control/organoid0.rds'))
-unique(organoid0@meta.data$sample)
-
-# Step 2. Iterate through organoid object & remove outliers                 ####
-# By this, I mean subset for genes found in >=3 genes, 
-# 1000 < number of genes in a cell < 99.5th percentile,
-# Additionally, subset to remove cells with > 5% percent.mt DNA
-
-
-rm(S1, S2, S3, S4, S6, S8, S9, S10,
-   S11, S12, S13, S14, S15, S16, S17, S18, S19,
-   S20, S21, S22, S23, S24, S25, S26)
-
-saveRDS('.outputs/02-Quality-Control/organoid0.rds')
-
+# init empty list to store sample's individual RDS files
+organoid_list <- list()
 
 mt_gene_names <- c(
   "ENSG00000198888", # ND1
@@ -190,214 +181,166 @@ mt_gene_names <- c(
   "MT-ND4L", "MT-CYB", "MT-ND2", "MT-ATP6","MT-CO2", "MT-ND5", "MT-CO1", "MT-ATP8", "MT-ND6", "MT-CO3", "MT-ND4", "MT-ND1" 
 )
 
+lower_nCount_RNA_cutoffs <- c(
+  1000, 1000, 1000, 1000, 1000, 1000, 900, 1000, 1200, 1000, 
+  1000, 1500, 1000, 1000, 1000, 1000, 1500, 1000, 900, 1200, 
+  1200, 1500, 1400, 1400
+)
 
-# Subset mt_gene_names to include only genes present in the Seurat object
-valid_mt_gene_names <- mt_gene_names[mt_gene_names %in% rownames(organoid0[["RNA"]]$counts)]
-
-# Add genes that start with "mt-" or "MT-" to the list
-additional_mt_genes <- rownames(organoid0[["RNA"]]$counts)[grepl("^mt-", rownames(organoid0[["RNA"]]$counts), ignore.case = TRUE)]
-
-# Combine the two lists and remove duplicates
-valid_mt_gene_names <- unique(c(valid_mt_gene_names, additional_mt_genes))
-
-# Recalculate the percentage of mitochondrial genes
-organoid0[["percent.mt"]] <- PercentageFeatureSet(organoid0, features = valid_mt_gene_names)
-
-### Now that we have our percent.mt labeled, take a snapshot of what the data
-## looks like across all 24 samples, in terms of nCount_RNA, nFeature_RNA, and
-## percent.mt
-
-## Additionally label the ribosomal percentage.
-organoid0[["percent.ribo"]] <- PercentageFeatureSet(organoid0, pattern = "^RP[SL]")
+samples_list <- list(S1, S2, S3, S4, S6, S8, S9, S10, S11, S12, S13, S14,
+             S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S26)
 
 
+# Loop through each sample
+for (i in 1:length(samples_list)) {
+  cat("Processing sample", i, "\n")
+  indiv_Seurat <- samples_list[[i]]
+  
+  sample_id <- unique(indiv_Seurat@meta.data$sample)
+  genotype <- unique(indiv_Seurat@meta.data$genotype)
+  
+  cells_before_QC <- ncol(indiv_Seurat)
+  cat("Sample ID:", sample_id, "- Cells before QC:", cells_before_QC, "\n")
+  
+  # Subset mt_gene_names to include only genes present in the Seurat object
+  counts_data <- GetAssayData(indiv_Seurat, slot = "counts", assay = "RNA")
+  valid_mt_gene_names <- mt_gene_names[mt_gene_names %in% rownames(counts_data)]
+  additional_mt_genes <- rownames(counts_data)[grepl("^mt-", rownames(counts_data), ignore.case = TRUE)]
+  valid_mt_gene_names <- unique(c(valid_mt_gene_names, additional_mt_genes))
+  indiv_Seurat[["percent.mt"]] <- PercentageFeatureSet(indiv_Seurat, features = valid_mt_gene_names)
+  
+  # Additionally label the ribosomal percentage
+  indiv_Seurat[["percent.ribo"]] <- PercentageFeatureSet(indiv_Seurat, pattern = "^RP[SL]")
+  
+  lower_cell_cutoff <- lower_nCount_RNA_cutoffs[i]
+  cat("Lower cell cutoff:", lower_cell_cutoff, "\n")
+  sorted_counts <- sort(indiv_Seurat@meta.data$nCount_RNA, decreasing = FALSE)
+  upper_cell_cutoff_rank <- ceiling(0.99 * length(sorted_counts))
+  cat("Upper cell cutoff rank:", upper_cell_cutoff_rank, "\n")
+  
+  # Subset the Seurat object based on nCount_RNA
+  indiv_Seurat <- subset(indiv_Seurat, subset = nCount_RNA > lower_cell_cutoff)
+  
+  # Perform SCTransform
+  indiv_Seurat <- SCTransform(indiv_Seurat, vars.to.regress = "percent.mt", verbose = TRUE)
+  
+  # Calculate and subset by barcode inflections
+  indiv_Seurat <- CalculateBarcodeInflections(
+    indiv_Seurat,
+    barcode.column = "nCount_RNA",
+    group.column = "sample",
+    threshold.low = NULL,
+    threshold.high = upper_cell_cutoff_rank
+  )
+  indiv_Seurat <- SubsetByBarcodeInflections(object = indiv_Seurat)
+  
+  # Filter genes expressed in less than 3 cells for both SCT and RNA assays
+  for (assay in c("SCT", "RNA")) {
+    raw_counts_mat <- GetAssayData(indiv_Seurat, slot = "counts", assay = assay)
+    genes_to_keep <- rowSums(raw_counts_mat > 0) >= 3
+    indiv_Seurat <- subset(indiv_Seurat, features = names(genes_to_keep[genes_to_keep]))
+  }
+  
+  # Subset for nFeature_RNA
+  nFeature_RNA_values <- indiv_Seurat@meta.data$nFeature_RNA
+  sorted_nFeature_RNA <- sort(nFeature_RNA_values, decreasing = FALSE)
+  upper_index_nFeature <- ceiling(0.99 * length(sorted_nFeature_RNA))
+  upper_feature_cutoff <- sorted_nFeature_RNA[upper_index_nFeature]
+  cat("Upper feature cutoff:", upper_feature_cutoff, "\n")
+  
+  # Set thresholds for nFeature_RNA
+  lower_limit_nFeature <- 200
+  indiv_Seurat <- subset(indiv_Seurat, subset = nFeature_RNA > lower_limit_nFeature)
+  
+  cells_after_QC <- ncol(indiv_Seurat)
+  percent_recovery_QC <- 100 * (cells_after_QC / cells_before_QC)
+  
+  # Perform DoubletFinder
+  indiv_Seurat <- NormalizeData(indiv_Seurat, assay = "RNA", verbose = TRUE)
+  indiv_QC <- RunPCA(indiv_Seurat, verbose = FALSE)
+  
+  # Verify PCA results
+  pca_results <- Embeddings(indiv_QC, reduction = "pca")
+  cat("PCA results dimension:", dim(pca_results), "\n")
+  
+  indiv_QC <- RunUMAP(indiv_QC, dims = 1:10, reduction = "pca")
+  indiv_QC <- FindNeighbors(indiv_QC, dims = 1:15, reduction = "pca")
+  indiv_QC <- FindClusters(indiv_QC, resolution = 0.6)
+  annotations <- indiv_QC@meta.data$seurat_clusters
+  
+  sweep.res.list_organoid <- paramSweep(indiv_QC, PCs = 1:10, sct = TRUE)
+  sweep.stats_organoid <- summarizeSweep(sweep.res.list_organoid, GT = FALSE)
+  bcmvn_organoid <- find.pK(sweep.stats_organoid)
+  
+  optimal_pK <- bcmvn_organoid$pK[which.max(bcmvn_organoid$BCmetric)]
+  homotypic.prop <- modelHomotypic(annotations)
+  nExp_poi <- round(0.075 * nrow(indiv_QC@meta.data))
+  nExp_poi.adj <- round(nExp_poi * (1 - homotypic.prop))
+  
+  # Check the number of expected doublets
+  cat("Expected doublets (nExp_poi.adj):", nExp_poi.adj, "\n")
+  
+  indiv_QC <- doubletFinder_v3(indiv_QC, PCs = 1:10, pN = 0.25, pK = optimal_pK, nExp = nExp_poi.adj, sct = TRUE)
+  
+  cells_after_DF <- ncol(indiv_QC)
+  percent_recovery_DF <- 100 * (cells_after_DF / cells_after_QC)
+  percent_removed_DF <- 100 - percent_recovery_DF
+  cat("Sample:", sample_id, "- Cells before:", cells_before_QC, "- Cells after DF:", cells_after_DF, "\n")
+  
+  # Append results to dataframe
+  new_row <- data.frame(
+    sample = sample_id,
+    genotype = genotype,
+    cells_before_QC = cells_before_QC,
+    cells_after_QC = cells_after_QC,
+    percent_recovery_QC = percent_recovery_QC,
+    cells_after_doubletF = cells_after_DF,
+    percent_recovery_DF = percent_recovery_DF,
+    percent_removed_DF = percent_removed_DF,
+    stringsAsFactors = FALSE
+  )
+  
+  cell_counts_df <- rbind(cell_counts_df, new_row)
+}
 
 
-# saveRDS(organoid0, file = paste0(dir, out, 'organoid0.rds'))
-# organoid0 <- readRDS(paste0(dir, out, 'organoid0.rds'))
+if (length(organoid_list) > 1) {
+  # Merge all Seurat objects in the organoid_list
+  organoid1 <- Reduce(function(x, y) merge(x, y, project = "APOE_Organoid"), organoid_list)
+} else if (length(organoid_list) == 1) {
+  # Only one object, rename the project
+  organoid1 <- organoid_list[[1]]
+  organoid1@project.name <- "APOE_Organoid"
+} else {
+  # Error catch
+  message("No data processed successfully.")
+}
 
-## 
-# First, for plotting reasons, calculate the cutoffs for nCount_RNA:
-# This time, we'll do a more-stringent upper_cell_cutoff.
-# Note that the reason for the last one being 0.997 was due to my having run through
-# it as 0.997 the first time, then recovering and replicating the same results at that cutoff.
-# We will do a 0.99 cutoff and use that this time around.
-upper_cutoff_rank <- quantile(organoid0@meta.data$nCount_RNA, probs = 0.99)
-
-lower_cell_cutoff <- 900 #minimum of the lower_cell_cutoffs prev. used.
-# Manually set the lower cutoff
-
-cat('lower_cell_cutoff:', lower_cell_cutoff, '\n')
-sorted_counts <- sort(organoid0@meta.data$nCount_RNA, decreasing = FALSE)
-
-# Calculate the index for the 99th percentile
-index <- ceiling(0.97 * length(sorted_counts))
-
-# Retrieve the exact nCount_RNA value at the 99.5th percentile
-upper_cell_cutoff <- sorted_counts[index]
-
-cat('upper_cell_cutoff:', upper_cell_cutoff, '\n')
-
-# Extract the nFeature_RNA values from the metadata
-nFeature_RNA_values <- organoid0@meta.data$nFeature_RNA
-
-# Sort the nFeature_RNA values in ascending order
-sorted_nFeature_RNA <- sort(nFeature_RNA_values, decreasing = FALSE)
-
-# Calculate the index for the 99th percentile
-index_nFeature <- ceiling(0.97 * length(sorted_nFeature_RNA))
-
-# Retrieve the exact nFeature_RNA value at the 99th percentile
-upper_feature_cutoff <- sorted_nFeature_RNA[index_nFeature]
-
-# Print the upper cutoff for nFeature_RNA
-cat('upper_feature_cutoff:', upper_feature_cutoff, '\n')
+saveRDS(organoid1, file = paste0(dir, out, 'organoid1.rds'))
 
 
-features <- c("nFeature_RNA", "nCount_RNA", "percent.mt")
-## plot the before-QC metrics
-vps<-VlnPlot(object = organoid0, features = features, ncol = 3, layer = "counts", pt.size = 0)
-vps
-vp1<-vps[[1]] +geom_hline(yintercept = 500,colour="black", na.rm = TRUE) + geom_hline(yintercept = upper_gene_cutoff, color = 'black', na.rm = TRUE) +labs(x = "organoid")
-vp2<-vps[[2]]+geom_hline(yintercept = upper_cell_cutoff,colour="black") +geom_hline(yintercept = lower_cell_cutoff,colour="black", na.rm = TRUE) +labs(x = "organoid") #+ scale_y_continuous(limits=c(0,100000))#+ scale_y_continuous(trans='log10')
-vp3<-vps[[3]]+geom_hline(yintercept = 12.5,colour="black") +labs(x = "organoid")
-p <- vp1 +  theme(axis.text.x = element_blank()) +vp2 + theme(axis.text.x = element_blank()) +vp3 + theme(axis.text.x = element_blank())
-plot(p)
-ggsave(filename = "outputs/images/02-Quality-Control/combined_Vln_plots_before_QC.png", 
-       plot = p, width = 6, height = 4)
+## Save the cell_counts_DF object
+
+write.csv(cell_counts_df, file = paste0(dir, out, "cell_counts_DF.csv"), row.names = FALSE)
+
+
+
+
+
+##### Step 3. Visualize the results of QC above            #####################
+library(stringr)
 
 ## Now, we go through the miQC again, but this time with a 0.97 posterior cutoff
 ## We are running through this a second time because we were originally just doing it 
 
 
-  
-
-  
-
-
-# Initialize a data frame to store cell counts before and after QC
-cell_counts <- data.frame(sample = character(), 
-                          genotype = character(),
-                          cells_before_QC = integer(), 
-                          cells_after_QC = integer()
-                          )
-
-# Get unique sample identifiers
-samples <- unique(organoid0@meta.data$sample)
-# unique(samples)
-organoid_list <- list()
-
-VlnPlot(organoid0, pt.size = 0, group.by = 'sample', features = 'nFeature_RNA', log = TRUE)
-
-# organoid0 <- readRDS('outputs/organoid0.rds')
-print(unique(organoid0@meta.data$sample))
-
-#### Count initial sample's cell counts here.
-# Load required libraries
+VlnPlot(organoid1, pt.size = 0, group.by = 'sample', features = 'percent.mt', log = TRUE)
+ggsave(filename = "outputs/images/02-Quality-Control/combined_Vln_plots_before_QC.png", 
+       plot = p, width = 6, height = 4)
 
 
-### Then do the QC here on the organoid0 object
-
-# Loop over each sample
-for (sample_id in samples) {
-  # Subset Seurat object for the current sample
-  indiv_QC <- subset(organoid0, subset = sample == sample_id)
-  
-  # Record the number of cells before QC
-  cells_before <- ncol(indiv_QC)
-  
-  # Add cells_before_QC to the meta.data of the original Seurat object
-  organoid0@meta.data$cells_before_QC[organoid0@meta.data$sample == sample_id] <- cells_before
-  
-  # Set thresholds for nFeature_RNA
-  lower_limit_nFeature <- 500
-  upper_limit_nFeature <- quantile(indiv_QC@meta.data$nFeature_RNA, probs = 0.97)
-  
-  # Subset cells based on nFeature_RNA thresholds
-  indiv_QC <- subset(indiv_QC, subset = nFeature_RNA > lower_limit_nFeature & nFeature_RNA < upper_limit_nFeature)
-  
-  num_umis_before <- sum(indiv_QC[["nCount_RNA"]] < 1000)
-  
-  # Filter genes expressed in less than 3 cells
-  raw_counts_mat <- GetAssayData(indiv_QC, slot = "counts", assay = "RNA")
-  genes_to_keep <- rowSums(raw_counts_mat > 0) >= 3
-  indiv_QC <- subset(indiv_QC, features = rownames(indiv_QC)[genes_to_keep])
-  
-  # Set thresholds for nCount_RNA
-  upper_limit_nCount <- quantile(indiv_QC@meta.data$nCount_RNA, probs = 0.97)
-  lower_limit_nCount <- 500  # Example lower limit
-  
-  # Subset cells based on nCount_RNA thresholds
-  indiv_QC <- subset(indiv_QC, subset = nCount_RNA > lower_limit_nCount & nCount_RNA < upper_limit_nCount)
-  
-  indiv_QC <- subset(indiv_QC, subset = percent.mt < 10)
-  
-  # Record the number of cells after QC
-  cells_after <- ncol(indiv_QC)
-  
-  # Add cells_after_QC to the meta.data of the original Seurat object
-  organoid0@meta.data$cells_after_QC[organoid0@meta.data$sample == sample_id] <- cells_after
-  
-  # Print statement for debugging
-  print(paste0("Sample: ", sample_id, ". cells_before:", cells_before, ". cells_after:", cells_after))
-  
-  # Append the QC'd object onto the organoid_list
-  organoid_list[[sample_id]] <- indiv_QC
-  
-  # Extract genotype for the current sample
-  genotype <- unique(indiv_QC@meta.data$genotype)
-  
-  # Append the cell count information to the data frame
-  cell_counts <- rbind(cell_counts, data.frame(sample = sample_id,
-                                               genotype = genotype,
-                                               cells_before_QC = cells_before,
-                                               cells_after_QC = cells_after))
-  
-  num_umis_after <- sum(indiv_QC[["nCount_RNA"]] < 1000)
-  
-  # Print statement for debugging
-  print(paste("Number of UMIs per cell before (under 1000):", num_umis_before, 
-              ". Number of UMIs per cell after (under 1000):", num_umis_after))
-}
-
-
-### Count the after-QC cell counts here.
-
-# merge all QC'd Seurat objects into one (all alrdy have unique cell identifiers)
-if(length(organoid_list) > 1) {
-  # do.call to apply the merge function to a list of Seurat objects
-  organoid1 <- do.call(merge, c(list(x = organoid_list[[1]], y = organoid_list[-1]), list(project = "APOE_Organoid")))
-} else if(length(organoid_list) == 1) {
-  # only one object, simply rename the project if necessary
-  organoid1 <- RenameProject(organoid_list[[1]], "APOE_Organoid")
-} else {
-  # error catch
-  message("No data processed successfully.")
-}
-
-print(cell_counts)
-
-# Aggregate cell counts by genotype
-aggregated_cell_counts <- aggregate(cbind(cells_before_QC, cells_after_QC) ~ genotype, data = cell_counts, FUN = sum)
-
-# Print the result
-print(aggregated_cell_counts)
-
-###
-
-
-
-library(stringr)
-sum(str_detect(rownames(organoid0), '^ENSG'))
-
-# View the cell counts data frame
-print(cell_counts)
-
-saveRDS(organoid1, file = paste0(dir, "/", out, "/organoid1.rds"))
 
 # Step 3. Visualize after-QC metrics                                             ####
-
-organoid1 <- readRDS('/projectnb/tcwlab/LabMember/akg/projects/APOE_Organoid/outputs/02-Quality-Control/organoid1.rds')
 
 features <- c("nFeature_RNA", "nCount_RNA", "percent.mt")
 ## plot the before-QC metrics
@@ -405,30 +348,11 @@ vps<-VlnPlot(object = organoid1, features = features, ncol = 3, layer = "counts"
 vps
 vp1<-vps[[1]] +geom_hline(yintercept = 200,colour="black", na.rm = TRUE) +labs(x = "organoid")
 vp2<-vps[[2]]+geom_hline(yintercept = upper_cell_cutoff,colour="black") +geom_hline(yintercept = lower_cell_cutoff,colour="black") +labs(x = "organoid") #+ scale_y_continuous(limits=c(0,100000))#+ scale_y_continuous(trans='log10')
-vp3<-vps[[3]]+geom_hline(yintercept = 10,colour="black") +labs(x = "organoid")
+vp3<-vps[[3]]+geom_hline(yintercept = 5, colour="black") +labs(x = "organoid")
 p <- vp1 +  theme(axis.text.x = element_blank()) +vp2 + theme(axis.text.x = element_blank()) +vp3 + theme(axis.text.x = element_blank())
-plot(p)
 
 
-### This below is just to re-define the quantile and upper_cell and lower_cell
-### cutoffs for the sake of visuali
-# We will do a 0.99 cutoff and use that this time around.
-upper_cutoff_rank <- quantile(organoid1@meta.data$nCount_RNA, probs = 0.99)
+output_directory <- paste0(dir, 'outputs/images/02-Quality-Control/After_QC_Vln_Plot.png')
 
-lower_cell_cutoff <- 900 #minimum of the lower_cell_cutoffs prev. used.
-# Manually set the lower cutoff
-
-cat('lower_cell_cutoff:', lower_cell_cutoff, '\n')
-sorted_counts <- sort(organoid1@meta.data$nCount_RNA, decreasing = FALSE)
-
-# Calculate the index for the 99th percentile
-index <- ceiling(0.99 * length(sorted_counts))
-
-# Retrieve the exact nCount_RNA value at the 99.5th percentile
-upper_cell_cutoff <- sorted_counts[index]
-
-cat('upper_cell_cutoff:', upper_cell_cutoff, '\n')
-
-organoid1 <- subset(organoid1, subset = nCount_RNA < upper_cell_cutoff)
-
-VlnPlot(organoid1, pt.size = 0, group.by = 'sample', features = 'nCount_RNA', log = TRUE)
+# Save the plot
+ggsave(output_file, plot = p, width = 10, height = 8)

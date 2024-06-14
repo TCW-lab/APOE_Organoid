@@ -1,0 +1,33 @@
+#!/bin/bash -l
+# Parameters of the Job:
+
+#$ -P tcwlab
+#$ -j y
+#$ -l h_rt=24:00:00
+#$ -o ./logs/02-Quality_Control.log
+#$ -pe omp 28
+
+# Modules to load:
+module load R/4.2.1
+
+# Keep track of some information just in case anything goes wrong
+echo "=========================================================="
+echo "Starting on : $(date)"
+echo "Running on node : $(hostname)"
+echo "Current directory : $(pwd)"
+echo "Current job ID : $JOB_ID"
+echo "Current job name : $JOB_NAME"
+if [[ -n "${SGE_TASK_ID}" && $SGE_TASK_ID != "undefined" ]]; then
+echo "Task index number : $SGE_TASK_ID"
+fi
+if [[ -n "${SGE_TASK_LAST}" && $SGE_TASK_LAST != "undefined" ]]; then
+echo "Total task number : $SGE_TASK_LAST"
+fi
+echo "=========================================================="
+
+# Run the R script and log output to both the console and the log file
+Rscript scripts/02-Quality_Control.R 2>&1 | tee -a ./logs/02-Quality_Control.log
+
+echo "=========================================================="
+echo "Finished Analysis for job $JOB_ID on : $(date)"
+echo "=========================================================="

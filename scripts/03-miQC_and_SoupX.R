@@ -5,7 +5,7 @@ library(gridExtra)
 library(Matrix)
 library(scales)
 library(cowplot)
-library(Seurat) #Seurat v.3.0
+library(Seurat) #Seurat v.5
 library(RColorBrewer)
 library(BiocManager) #v 3.17
 library(tibble)
@@ -76,17 +76,20 @@ organoid2 <- readRDS(paste0(dir, '/outputs/03-miQC_and_SoupX/organoid2.rds'))
 #merge the counts layers into one:
 organoid2[["RNA"]] <- JoinLayers(organoid2[["RNA"]])
 
+# SCTransform on the organoid object to do normalization, scaling, etc.
+library(sctransform)
+organoid3 <- SCTransform(organoid2, vars.to.regress = "percent.mt", verbose = FALSE)
 
+# Dimensionality reduction
+organoid3 <- RunPCA(organoid3, features = VariableFeatures(object = organoid3), verbose = TRUE)
+organoid3 <- RunUMAP(organoid3, dims = 1:50)
 
-## Perform the normalization, VariableFeatures, Scaling, PCA, etc. here
-organoid2 <- NormalizeData(organoid2)
-organoid2 <- FindVariableFeatures(organoid2)
-organoid2 <- ScaleData(organoid2)
-organoid2 <- RunPCA(organoid2)
-organoid2 <- FindNeighbors(organoid2)
-organoid2 <- FindClusters(organoid2, resolution = 0.5)
+# Clustering
+organoid3 <- FindNeighbors(organoid3, dims = 1:50, k.param = 30, verbose = TRUE)
+organoid3 <- FindClusters(organoid3, resolution = 0.6, verbose = TRUE)
 
-# saveRDS(organoid2, file = paste0(dir, '/outputs/03-miQC_and_SoupX/organoid3.rds'))
+saveRDS(organoid3, file = paste0(dir, '/outputs/03-miQC_and_SoupX/organoid3.rds'))
+# organoid3 <- readRDS(paste0(dir, '/outputs/03-miQC_and_SoupX/organoid3.rds'))
 
 # Directories for raw counts of each sample
 raw_counts_directories <- c("1_S16/af_quant", "2_S8/af_quant", "3_S9/af_quant", "4_S14/af_quant", "6_S23/af_quant",
@@ -143,6 +146,9 @@ apply_soupX_correction <- function(seurat_obj, raw_counts_directory) {
   seurat_obj[["SoupX_counts"]] <- CreateAssayObject(counts = soup_out)
   seurat_obj <- SetAssayData(seurat_obj, layer = "counts", new.data = soup_out, assay = "RNA")
   
+  seurat_obj[["RNA"]] <- as(object = seurat_obj[["SoupX_counts"]], Class = "Assay5")
+  # Remove the SoupX_counts assay
+  seurat_obj[["SoupX_counts"]] <- NULL
   # Return the corrected Seurat object
   return(seurat_obj)
 }
@@ -154,7 +160,7 @@ mrna_counts <- data.frame(sample = character(),
                           mrna_after_correction = numeric()
 )
 
-samples <- unique(organoid2@meta.data$sample)
+samples <- unique(organoid3@meta.data$sample)
 organoid_list <- list()
 # Loop over each sample to apply SoupX correction and record mRNA sums
 for (i in 1:length(samples)) {
@@ -162,7 +168,7 @@ for (i in 1:length(samples)) {
   raw_counts_directory_ending <- raw_counts_directories[i]
   raw_counts_directory <- paste0(dir, '/outputs/01-Simpleaf_Outputs/',raw_counts_directory_ending)
   # Subset Seurat object for the current sample
-  indiv_seurat <- subset(organoid2, subset = sample == sample_id)
+  indiv_seurat <- subset(organoid3, subset = sample == sample_id)
   
   # Record the sum of mRNA molecules before correction
   mrna_before <- sum(indiv_seurat@meta.data$nCount_RNA)
@@ -183,19 +189,27 @@ for (i in 1:length(samples)) {
   genotype <- unique(indiv_seurat@meta.data$genotype)
   
   # Append the mRNA count information to the data frame
-  mrna_counts <- rbind(mrna_counts, data.frame(sample = sample_id,
-                                               genotype = genotype,
-                                               mrna_before_correction = mrna_before,
-                                               mrna_after_correction = mrna_after))
+  new_row <- data.frame(sample = sample_id,
+                        genotype = genotype,
+                        mrna_before_correction = mrna_before,
+                        mrna_after_correction = mrna_after)
+  colnames(new_row) <- colnames(mrna_counts)
+  
+  # Append the new row to mrna_counts
+  mrna_counts <- rbind(mrna_counts, new_row)
 }
-
+count = 1
 # Merge all corrected Seurat objects into one (all already have unique cell identifiers)
 if(length(organoid_list) > 1) {
+  
+  print(paste0('Now at: ', count))
   # do.call to apply the merge function to a list of Seurat objects
-  organoid3 <- do.call(merge, c(list(x = organoid_list[[1]], y = organoid_list[-1]), list(project = "APOE_Organoid")))
+  organoid4 <- do.call(merge, c(list(x = organoid_list[[1]], y = organoid_list[-1]), 
+                                list(project = "APOE_Organoid")))
+  count = count + 1
 } else if(length(organoid_list) == 1) {
   # only one object, simply rename the project if necessary
-  organoid3 <- RenameProject(organoid_list[[1]], "APOE_Organoid")
+  organoid4 <- RenameProject(organoid_list[[1]], "APOE_Organoid")
 } else {
   # error catch
   message("No data processed successfully.")
@@ -213,4 +227,4 @@ print(aggregated_mrna_counts)
 write.csv(mrna_counts, file = paste0(dir, '/outputs/03-miQC_and_SoupX/SoupX_counts_by_Sample.csv'))
 write.csv(aggregated_mrna_counts, file = paste0(dir, '/outputs/03-miQC_and_SoupX/SoupX_counts_by_Genotype.csv'))
 
-saveRDS(organoid3, file = paste0(dir, '/outputs/03-miQC_and_SoupX/organoid4.rds'))
+saveRDS(organoid4, file = paste0(dir, '/outputs/03-miQC_and_SoupX/organoid4.rds'))
