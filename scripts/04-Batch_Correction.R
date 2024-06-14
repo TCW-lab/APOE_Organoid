@@ -88,31 +88,3 @@ DimPlot(organoid, reduction = "humap", group.by = "seurat_clusters")
 
 
 saveRDS(organoid, file = paste0(dir, '/outputs/05-Doublet_Finder/organoid2.rds'))
-        
-# Step 4 might be worth deleting since we accomplish this in the 05-Doublet_Finder
-# script
-
-
-#### Step 4. Run DoubletFinder to remove possible doublets #####################
-
-library(DoubletFinder)
-## The following code is from 
-## Chris McGinnis (UCSF): https://github.com/chris-mcginnis-ucsf/DoubletFinder
-
-## pK Identification (no ground-truth) ---------------------------------------------------------------------------------------
-sweep.res.list_organoid <- paramSweep(organoid, PCs = 1:10, sct = FALSE)
-sweep.stats_organoid <- summarizeSweep(sweep.res.list_organoid, GT = FALSE)
-bcmvn_organoid <- find.pK(sweep.stats_organoid)
-
-## Homotypic Doublet Proportion Estimate -------------------------------------------------------------------------------------
-homotypic.prop <- modelHomotypic(annotations)           ## ex: annotations <- organoid@meta.data$ClusteringResults
-nExp_poi <- round(0.075*nrow(organoid@meta.data))  ## Assuming 7.5% doublet formation rate - tailor for your dataset
-nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
-
-## Run DoubletFinder with varying classification stringencies ----------------------------------------------------------------
-
-organoid <- doubletFinder(organoid, PCs = 1:10, pN = 0.25, pK = 0.09, 
-                            nExp = nExp_poi.adj, sct = FALSE)
-
-### Now save the doublet-removed organoid object.
-saveRDS(organoid, file = paste0(dir, '/outputs/05-Cluster_Annotation/organoid1.rds'))

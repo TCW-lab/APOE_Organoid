@@ -38,9 +38,6 @@ out <- '/outputs/06-Cluster_Annotation'
 
 organoid <- readRDS(paste0(dir, '/outputs/05-Doublet_Finder', '/organoid.rds'))
 
-organoid <- Seurat::SCTransform(organoid, vars.to.regress = 'percent.mt', vst.flavor="v2",
-                                useNames = FALSE)
-
 unique(organoid$RNA_snn_res.0.6)
 saveRDS(organoid, file = paste0(dir, '/outputs/05-Doublet_Finder/organoid.rds'))
 
