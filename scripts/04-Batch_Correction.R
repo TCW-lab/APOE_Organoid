@@ -81,6 +81,8 @@ rm(plot1, plot2, p)
 ### This is if you have not already performed SCTransform, or prefer not to use
 ### SCTransform due to wanting to define the parameters you use to normalize,
 ### FindVariableFeats, Scale, etc.
+### NOTE: in this particular analysis I am NOT using SCTransform(). Instead,
+### I am doing each step manually.
 
 DefaultAssay(organoid) <- 'SoupX_counts'
 organoid@active.assay
