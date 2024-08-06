@@ -33,13 +33,20 @@ out <- '/outputs/05-Cluster_Annotation'
 
 ### Step 1. Read in RDS object and plot FeaturePlots for various markers   #####
 
-organoid <- readRDS(paste0(dir, '/outputs/05-Cluster_Annotation', '/organoid.rds'))
+organoid <- readRDS(paste0(dir, '/outputs/05-Cluster_Annotation', '/organoid_unannotated.rds'))
+# ^ organoid is the original, unannotated ^
 
-DimPlot(organoid, reduction = 'umap', group.by = 'seurat_clusters', label = TRUE)
+unique(organoid$seurat_clusters)
 
+DimPlot(organoid, reduction = 'humap', group.by = 'seurat_clusters', label = TRUE,
+        label.size = 4)
 
-organoid$harmony_clusters <- Idents(organoid)
+DimPlot(organoid, reduction = 'humap', group.by = 'seurat_clusters', label = TRUE)
 
+Idents(organoid) <- organoid$seurat_clusters
+organoid$seurat_clusters <- Idents(organoid)
+unique(Idents(organoid))
+unique(organoid$seurat_clusters)
 
 Final_Markers_Progenitors = c("TOP2A", "MKI67", "FOXM1", "CENPF", "PAX6", "PCNA", "E2F2", "HOPX", "LHX2", "OTX2", "GLI3", "HES2", "HES6") 
 Final_Markers_General_Neuron = c("DCX", "INSM1", "ST18", "NHLH1", "NEUROD1", "NEUROD6", "PRDM8", "MYT1L", "MAPT", "SNAP25", "SYP", "DLX6")
@@ -51,16 +58,17 @@ Final_Markers_VLMC = c("LUM", "PDGFRA", "DCN", "POSTN", "OGN", "APOD", "RSPO3")
 Final_Markers_Pericytes = c("CSPG4", "PDGFRB", "VTN", "ACTA2", "KCNJ8", "ABCC9", "ACE2", "ART3", "ATP13A5") #rm CD146
 Final_Markers_PigEp = c("CLIC6") # https://www.nature.com/articles/s41467-020-15326-5
 Final_Markers_Chloroid = c("ITGA8", "TTR", "FOLR1", "PRLR")
-Final_Markers_Radial_Glia = c('PAX6', 'GLAST', 'SOX2', 'MEIS2', 'FOXP2', "TLE4", "VIM")
+Final_Markers_Radial_Glia = c('PAX6', 'SOX2', 'MEIS2', 'FOXP2', "TLE4", "VIM")
+Final_Markers_Neural_Crest = c('FOXD3', 'SNAI1', 'SNAI2', 'SOX8', 'SOX9', 'SOX10')
 ## Visualize Canonical Cell Type Marker Expression
 #Feature Plots
 
 Final_Marker_List = list(Final_Markers_Progenitors, Final_Markers_General_Neuron, Final_Markers_Glut_Neuron, Final_Markers_Gaba_Neuron,
                          Final_Markers_Astrocyte, Final_Markers_OPC, Final_Markers_VLMC, Final_Markers_Pericytes,
-                         Final_Markers_PigEp, Final_Markers_Chloroid, Final_Markers_Radial_Glia)
+                         Final_Markers_PigEp, Final_Markers_Chloroid, Final_Markers_Radial_Glia, Final_Markers_Neural_Crest)
 Final_Marker_List_Names = c("Progenitor", "Neuron", "Glutamatergic", "GABA",
                             "Astrocyte", "OPC", "VLMC", "Pericyte",
-                            "PigEp", "Chloroid", "Radial_Glia")
+                            "PigEp", "Chloroid", "Radial_Glia", "Neural_Crest")
 
 count = 1
 for (x in Final_Marker_List) {
@@ -95,27 +103,9 @@ FeaturePlot(organoid, reduction = "humap", label = TRUE, label.size = 6)
 
 feats <- list(Final_Markers_Progenitors, Final_Markers_General_Neuron, Final_Markers_Glut_Neuron, Final_Markers_Gaba_Neuron,
               Final_Markers_Astrocyte, Final_Markers_OPC, Final_Markers_VLMC, Final_Markers_Pericytes,
-              Final_Markers_PigEp, Final_Markers_Chloroid, Final_Markers_Radial_Glia)
+              Final_Markers_PigEp, Final_Markers_Chloroid, Final_Markers_Radial_Glia, Final_Markers_Neural_Crest)
 marker_names <- list("Progenitors", "General_Neuron", "Glut", "GABA", "Astrocyte", 
-                     "OPC", "VLMC", "Pericyte", "PigEp", "Chloroid", "Radial_Glia")
-
-DotPlot(
-  organoid,
-  features = c("OLIG1", "OLIG2", "PCDH15", "LHFPL3", "MBP"),
-  cols = c("light grey", "blue"),
-  col.min = -2.5,
-  col.max = 2.5,
-  dot.min = 0,
-  dot.scale = 10,
-  idents = NULL,
-  group.by = NULL,
-  split.by = NULL,
-  cluster.idents = FALSE,
-  scale = TRUE,
-  scale.by = "radius"
-  # scale.min = NA,
-  # scale.max = NA
-)
+                     "OPC", "VLMC", "Pericyte", "PigEp", "Chloroid", "Radial_Glia", "Neural_Crest")
 
 
 count = 0
@@ -160,72 +150,76 @@ for (y in feats) {
 ## Step 2. Actual Annotation                                                ####
 
 ## Astrocyte:
-DimPlot(organoid, reduction = "humap", label = TRUE, label.size = 6)
+DimPlot(organoid, reduction = "humap", label = TRUE, label.size = 4)
+
 
 #Idents (For Reference):
-c("GABAergic", "Glutamatergic", "NPCs", "GABAergic", "Astrocyte", "Astrocyte", "GABAergic", 7, "Glutamatergic", "Immature Astrocyte",
-  "Glutamatergic", "GABAergic", "NPCs (cycling)", 13, 14, 15, "NPCs (cycling)", 17, "Astrocyte", "NPCs (cycling)",
-  "VLMC", "NPCs", "Pigmented Epithelial", 23)
+c("GABAergic", "GABAergic", 'Glutamatergic', "NPCs", "Astrocyte", 
+  "Astrocyte", "OPC/Oligo", "GABAergic", 'Glutamatergic', "Astroglia",
+  'Glutamatergic', "NPCs (cycling)", "NPCs (cycling)", 'Pericyte Progenitor', 'Astrocyte', 
+  "NPCs (cycling)", 'unknown1', "Astrocyte", "NPCs (cycling)", "VLMC",
+  "NPCs", "Choroid Plexus", 'unknown2')
 
-### Top level of annotation: Astrocyte
-### 4,5, 18, 9, 
-### 14 (This is a different sub-level annotation)
+### Top level of annotation: Astrocyte (4.33x1.5)
+### 18, 3, 4
 ### 
+organoid <- RenameIdents(organoid, "3" = "Astrocyte")
 organoid <- RenameIdents(organoid, "4" = "Astrocyte")
-organoid <- RenameIdents(organoid, "5" = "Astrocyte")
+organoid <- RenameIdents(organoid, '15' = 'Astrocyte')
 organoid <- RenameIdents(organoid, "18" = "Astrocyte")
-organoid <- RenameIdents(organoid, "14" = "Astrocyte") # temporary annotation.
-# DimPlot(organoid, reduction = "humap", label = TRUE, label.size = 5)
-# 9 is immature Astrocyte
-organoid <- RenameIdents(organoid, "9" = "Immature Astrocyte")
+DimPlot(organoid, reduction = "humap", label = TRUE, label.size = 4)
+# 7 is Astroglia
+organoid <- RenameIdents(organoid, "7" = "Astroglia")
+
 
 ## GABAergic:
-# 0, 3, 6, 11 (somewhat questionable)
+# 0,2,5
 organoid <- RenameIdents(organoid, "0" = "GABAergic")
-organoid <- RenameIdents(organoid, "3" = "GABAergic")
-organoid <- RenameIdents(organoid, "6" = "GABAergic")
-organoid <- RenameIdents(organoid, "11" = "GABAergic")
+organoid <- RenameIdents(organoid, "2" = "GABAergic")
+organoid <- RenameIdents(organoid, "5" = "GABAergic")
 
-
-# DimPlot(organoid, reduction = "humap", label = TRUE, label.size = 5)
+DimPlot(organoid, reduction = "humap", label = TRUE, label.size = 4)
 
 ## Glutamatergic:
-# 1, 8, 10
+# 1, 8, 9
 organoid <- RenameIdents(organoid, "1" = "Glutamatergic")
+organoid <- RenameIdents(organoid, "9" = "Glutamatergic")
 organoid <- RenameIdents(organoid, "8" = "Glutamatergic")
-organoid <- RenameIdents(organoid, "10" = "Glutamatergic")
 # DimPlot(organoid, reduction = "humap", label = TRUE, label.size = 5)
+
+## Choroid Plexus
+# 21
+# organoid <- RenameIdents(organoid, "21" = "Choroid Plexus") # renaming this Pericyte
 
 
 ## NPCs:
-# NPCs (cycling) 12, 16, 19, 13 is dubious
-organoid <- RenameIdents(organoid, "12" = "NPCs (cycling)")
+# NPCs (cycling) 13, 16, 19
+organoid <- RenameIdents(organoid, "11" = "NPCs (cycling)")
 organoid <- RenameIdents(organoid, "13" = "NPCs (cycling)")
 organoid <- RenameIdents(organoid, "16" = "NPCs (cycling)")
-organoid <- RenameIdents(organoid, "19" = "NPCs (cycling)")
-# DimPlot(organoid, reduction = 'humap', label = TRUE, label.size = 5)
-
+DimPlot(organoid, reduction = 'humap', label = TRUE, label.size = 4)
+organoid <- RenameIdents(organoid, "12" = "NPCs")
 # NPCs (non-cycling): 
-organoid <- RenameIdents(organoid, "2" = "NPCs")
-organoid <- RenameIdents(organoid, "21" = "NPCs")
-## OPCs:
-# 7
-organoid <- RenameIdents(organoid, "7" = "OPC")
-# DimPlot(organoid, reduction = 'humap', label = TRUE, label.size = 5)
+# organoid <- RenameIdents(organoid, "9" = "NPCs")
+# organoid <- RenameIdents(organoid, "11" = "NPCs")
 
-## Pericyte:
-# 22
-organoid <- RenameIdents(organoid, "22" = "Pericyte")
-# DimPlot(organoid, reduction = 'humap', label = TRUE, label.size = 5)
-# Pericyte Progenitor
-organoid <- RenameIdents(organoid, '15' = 'Pericyte Progenitor Cell')
+## OPCs / Oligo:
+# 5
+organoid <- RenameIdents(organoid, "6" = "OPC / Oligo")
+organoid <- RenameIdents(organoid, "10" = "OPC / Oligo")
+DimPlot(organoid, reduction = 'humap', label = TRUE, label.size = 4)
 
-## VLMC:
+## Pericyte (progenitor cells):
 # 20
-organoid <- RenameIdents(organoid, "20" = "VLMC")
-# DimPlot(organoid, reduction = 'humap', label = TRUE, label.size = 4.5)
+organoid <- RenameIdents(organoid, '20' = 'Pericyte') 
+# Pericyte Progenitor 14
+organoid <- RenameIdents(organoid, '14' = 'Pericyte Progenitor') 
 
-DimPlot(organoid, reduction = 'humap', label = TRUE)
+DimPlot(organoid, reduction = 'humap', label = TRUE, label.size = 4)
+## VLMC:
+# 19
+organoid <- RenameIdents(organoid, "19" = "VLMC")
+# DimPlot(organoid, reduction = 'humap', label = TRUE, label.size = 4.5)
 
 ## Pigmented Epithelial
 # 22 for certain.
@@ -237,8 +231,6 @@ DimPlot(organoid, reduction = 'humap', label = TRUE)
 organoid <- RenameIdents(organoid, "17" = "unknown")
 
 
-?FindMarkers
-markers <- FindMarkers(organoid, ident.1 = "15")
 #### Add labels that do not overlap with each other:
 # Install and load required packages
 
@@ -254,9 +246,13 @@ p <- p + geom_text_repel(aes(label = organoid@meta.data$cluster), size = 5)
 
 # Print the plot
 print(p)
+# DimPlot(organoid, reduction = 'humap', label = TRUE, size = 4)
 
+saveRDS(organoid, file = paste0(dir, out, '/organoid_annotated.rds'))
 
+### Step 3. Visualization for certain metrics                               ####
 
+organoid <- readRDS(paste0(dir, out, '/organoid_annotated.rds'))
 
 ##### 14 will currently be listed as Astrocyte (just for Today / tomorrow)
 ##### 15 will be determined when Alexandre views the expr markers
@@ -271,59 +267,85 @@ print(p)
 ## Provide Alexandre with .csv files of 15 (just create it from the dataframe output from FindMarkers).
 ## 
 
-library(pheatmap)
+### Visualize the expression across each of the 4 genotypes:
+library(ggplot2)
+library(gridExtra)
+# Ensure 'genotype' is a factor with correct levels
+organoid$genotype <- factor(organoid$genotype, levels = c("APOE22", "APOE33", "APOE33Ch", "APOE44"))
 
-# Assume 'markers' is your dataframe from FindMarkers
-markers <- FindMarkers(organoid, ident.1 = "unknown")
+# Create a base plot with all cells in light gray
+base_plot <- DimPlot(organoid, reduction = "humap", cells = colnames(organoid), 
+                     cols = "lightgray") + 
+  theme_minimal()
 
-# Filter the markers based on the given criteria
-filtered_markers <- markers %>%
-  filter(abs(avg_log2FC) > 1.0, pct.1 > 0.25, p_val_adj < 0.001)
+# Function to create individual plots for each genotype
+create_genotype_plot <- function(genotype) {
+  DimPlot(organoid, reduction = "humap", group.by = "genotype", cells.highlight = WhichCells(organoid, expression = genotype == !!genotype), 
+          cols.highlight = "blue", cols = "lightgray") + 
+    ggtitle(genotype) + 
+    theme_minimal() +
+    NoLegend()
+}
 
-# Separate up-regulated and down-regulated genes
-upregulated <- filtered_markers %>%
-  filter(avg_log2FC > 0) %>%
-  arrange(desc(abs(avg_log2FC))) %>%
-  head(20)
+# Create individual plots for each genotype
+plot_apoe22 <- create_genotype_plot("APOE22")
+plot_apoe33 <- create_genotype_plot("APOE33")
+plot_apoe33ch <- create_genotype_plot("APOE33Ch")
+plot_apoe44 <- create_genotype_plot("APOE44")
 
-downregulated <- filtered_markers %>%
-  filter(avg_log2FC < 0) %>%
-  arrange(desc(abs(avg_log2FC))) %>%
-  head(20)
+# Combine the plots into a 4-panel plot
+combined_plot <- grid.arrange(plot_apoe22, plot_apoe33, plot_apoe33ch, plot_apoe44, ncol = 2)
 
-# Combine the top 20 up- and down-regulated genes into a single dataframe
-top_genes <- bind_rows(upregulated, downregulated)
+# Display the combined plot
+print(combined_plot)
 
-# Extract the avg_log2FC values
-avg_log2FC_values <- top_genes$avg_log2FC
-names(avg_log2FC_values) <- rownames(top_genes)
 
-# Create a dataframe for the heatmap
-heatmap_data <- data.frame(Gene = names(avg_log2FC_values), avg_log2FC = avg_log2FC_values)
-rownames(heatmap_data) <- heatmap_data$Gene
-heatmap_data <- heatmap_data[, -1, drop = FALSE]  # Remove the Gene column
 
-pheatmap(heatmap_data,
-         cluster_rows = TRUE,
-         cluster_cols = FALSE,
-         show_rownames = TRUE,
-         show_colnames = FALSE,
-         color = colorRampPalette(c("blue", "white", "red"))(100),
-         main = "Top 20 Up- and Down-Regulated Genes Heatmap",
-         cellwidth = 40,  # Adjust the cell width to make the heatmap more compact
-         fontsize = 15,   # Adjust the font size to fit better
-         display_numbers = TRUE,  # Display the avg_log2FC values
-         number_format = "%.2f",  # Format numbers to two decimal places
-         number_color = "white"   # Set the text color to white
-)
 
-saveRDS(organoid, file = paste0(dir, '/outputs/05-Cluster_Annotation/organoid1.rds'))
- 
-### Step 3. Subset Seurat Objects for Pseudobulk Prep                       ####
+
+
+library(Seurat)
+library(ggplot2)
+library(gridExtra)
+
+# Check the available reductions
+print(Reductions(organoid))
+
+# Create individual plots for each genotype
+plot_apoe2 <- FeaturePlot(organoid, reduction = "humap", features = "genotype", 
+                          cells = WhichCells(organoid, expression = genotype == "APOE22")) + 
+  ggtitle("APOE22")
+
+plot_apoe3 <- FeaturePlot(organoid, reduction = "humap", features = "genotype", 
+                          cells = WhichCells(organoid, expression = genotype == "APOE33")) + 
+  ggtitle("APOE33")
+
+plot_apoe3ch <- FeaturePlot(organoid, reduction = "humap", features = "genotype", 
+                            cells = WhichCells(organoid, expression = genotype == "APOE33Ch")) + 
+  ggtitle("APOE33Ch")
+
+plot_apoe4 <- FeaturePlot(organoid, reduction = "humap", features = "genotype", 
+                          cells = WhichCells(organoid, expression = genotype == "APOE44")) + 
+  ggtitle("APOE44")
+
+# Combine the plots into a 4-panel plot
+grid.arrange(plot_apoe2, plot_apoe3, plot_apoe3ch, plot_apoe4, ncol = 2)
+
+
+
+
+# unique(organoid$seurat_clusters)
+
+
+
+organoid <- readRDS(paste0(dir, '/outputs/05-Cluster_Annotation/organoid1.rds'))
+# saveRDS(organoid, file = paste0(dir, '/outputs/05-Cluster_Annotation/organoid1.rds'))
+
+### Step 4. Subset Seurat Objects for Pseudobulk Prep                       ####
 
 
 cellTypes <- c('Glutamatergic', 'GABAergic', 'Astrocyte', 'OPC', 
-               'NPCs', 'VLMC', 'Pericyte Progenitor Cell', 'Pericyte', 'unknown', '23')
+               'NPCs', 'VLMC', 'Pericyte Progenitor Cell', 'Pericyte', 'unknown')
 
 # Gluta
 Glutamatergic <- subset(organoid, idents = "Glutamatergic")
@@ -340,10 +362,18 @@ NPCs <- subset(organoid, idents = "NPCs")
 saveRDS(NPCs, file = paste0(dir, out, '/NPCs.rds'))
 rm(NPCs)
 
+# NPCs (cycling)
+NPCsCycling <- subset(organoid, idents = "NPCs (cycling)")
+saveRDS(NPCsCycling, file = paste0(dir, out, '/NPCsCycling.rds'))
+rm(NPCsCycling)
+
+
+
+
 # Imm. Astrocyte
-ImmatureAstrocyte <- subset(organoid, idents = "Immature Astrocyte")
-saveRDS(ImmatureAstrocyte, file = paste0(dir, out, '/ImmatureAstrocyte.rds'))
-rm(ImmatureAstrocyte)
+Astroglia <- subset(organoid, idents = "Astroglia")
+saveRDS(Astroglia, file = paste0(dir, out, '/Astroglia.rds'))
+rm(Astroglia)
 
 # Astrocyte
 Astrocyte <- subset(organoid, idents = "Astrocyte")
@@ -351,14 +381,10 @@ saveRDS(Astrocyte, file = paste0(dir, out, '/Astrocyte.rds'))
 rm(Astrocyte)
 
 # OPC
-OPC <- subset(organoid, idents = "OPC")
-saveRDS(OPC, file = paste0(dir, out, '/OPC.rds'))
-rm(OPC)
+OPC_Oligo <- subset(organoid, idents = "OPC / Oligo")
+saveRDS(OPC_Oligo, file = paste0(dir, out, '/OPC_Oligo.rds'))
+rm(OPC_Oligo)
 
-# unknown
-unknown <- subset(organoid, idents = 'unknown')
-saveRDS(unknown, file = paste0(dir, out, '/unknown.rds'))
-rm(unknown)
 
 # Pericyte
 Pericyte <- subset(organoid, idents = "Pericyte")
@@ -366,15 +392,77 @@ saveRDS(Pericyte, file = paste0(dir, out, '/Pericyte.rds'))
 rm(Pericyte)
 
 # PericyteProgenitor
-PericyteProgenitor <- subset(organoid, idents = "Pericyte Progenitor Cell")
+PericyteProgenitor <- subset(organoid, idents = "Pericyte Progenitor")
 saveRDS(PericyteProgenitor, file = paste0(dir, out, '/PericyteProgenitor.rds'))
 rm(PericyteProgenitor)
 
-# Gluta
-cluster23 <- subset(organoid, idents = "23")
-saveRDS(cluster23, file = paste0(dir, out, '/23.rds'))
-rm(cluster23)
+# unknown1
+unknown1 <- subset(organoid, idents = "Unknown")
+saveRDS(unknown1, file = paste0(dir, out, '/Unknown.rds'))
+rm(Unknown)
 
 # VLMC
 VLMC <- subset(organoid, idents = 'VLMC')
 saveRDS(VLMC, file = paste0(dir, out, '/VLMC.rds'))
+rm(VLMC)
+#### Plot by genotype:
+
+
+DimPlot(organoid, group.by = 'genotype', reduction = 'humap')
+
+organoid$seurat_clusters <- Idents(organoid)
+# DimPlot(organoid, reduction = 'humap', label = TRUE)
+library(patchwork)
+# Calculate the total number of cells per cluster
+cluster_counts <- table(organoid@meta.data$seurat_clusters)
+
+# Order the clusters by the number of cells in descending order
+ordered_clusters <- names(sort(cluster_counts, decreasing = TRUE))
+custom_theme <- theme(
+  legend.position = "none",        # Remove legend
+  panel.grid.major = element_line(color = "gray", size = 0.25),  # Major grid lines
+  panel.grid.minor = element_line(color = "gray", size = 0.25), # Minor grid lines
+  panel.background = element_blank(),  # Remove panel background
+  plot.title = element_text(hjust = 0.5) # Center the plot titles
+)
+
+
+# Plot nCount_RNA with a title and no legend, ordered by the number of cells per cluster
+plot1 <- VlnPlot(organoid, features = "nCount_RNA", group.by = "seurat_clusters", pt.size = 0) +
+  ggtitle("nCount_RNA Distribution Across Seurat Clusters") +
+  custom_theme +
+  scale_x_discrete(limits = ordered_clusters) +
+  scale_y_log10()
+
+# Plot percent.mt with a title and no legend, ordered by the number of cells per cluster
+plot2 <- VlnPlot(organoid, features = "percent.mt", group.by = "seurat_clusters", pt.size = 0) +
+  ggtitle("percent.mt Distribution Across Seurat Clusters") +
+  custom_theme +
+  scale_x_discrete(limits = ordered_clusters) +
+  scale_y_log10()
+
+# Plot nFeature_RNA with a title and no legend, ordered by the number of cells per cluster
+# Plot nFeature_RNA with a title, no legend, background grid, and custom log scale
+plot3 <- VlnPlot(organoid, features = "nFeature_RNA", group.by = "seurat_clusters", pt.size = 0) +
+  ggtitle("nFeature_RNA Distribution Across Seurat Clusters") +
+  custom_theme +
+  scale_x_discrete(limits = ordered_clusters) +
+  scale_y_log10(breaks = c(100, 1000, 10000), labels = c("1e+02", "1e+03", "1e+04"))
+
+
+print(plot3)
+
+# Combine plots
+combined_plot <- plot1 + plot2 + plot3
+print(combined_plot)
+
+
+
+
+
+
+
+
+
+
+
